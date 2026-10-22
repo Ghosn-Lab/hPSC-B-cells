@@ -7,6 +7,14 @@ library(tidyr)
 library(rlang)
 library(ggplot2)
 library(scales)
+library(ggalluvial)
+
+cells_remove_indexed <- cells_remove |>
+  stringr::str_replace("_BM1$", "-57") |>
+  stringr::str_replace("_BM2$", "-58") |>
+  stringr::str_replace("_MBG51$", "-170") 
+
+cells_remove_indexed
 
 ## -------------------------------------------------------------------------
 ## Load heavy-chain annotations
@@ -172,9 +180,12 @@ plot_v_gene_usage_two <- function(
   p
 }
 
+bm_ann <- bm_ann[!bm_ann$cellranger_indexed_barcode %in% cells_remove_indexed, ]
+mbg51_ann <- mbg51_ann[!mbg51_ann$cellranger_indexed_barcode %in% cells_remove_indexed, ]
+
 plot <- plot_v_gene_usage_two(
   bm_ann,
-  il7_low_ann,
+  mbg51_ann,
   name1 = "BM_total",
   name2 = "IL7_low_hPSC",
   v_col = "v_gene",
@@ -183,7 +194,7 @@ plot <- plot_v_gene_usage_two(
 )
 
 ggsave(
-  filename = "figures/v_gene_usage_bm_vs_il7_low.svg",
+  filename = "~/Desktop/v_gene_usage_bm_vs_il7_low.svg",
   plot = plot,
   device = "svg",
   bg = "transparent",
@@ -406,3 +417,110 @@ ggsave(
   height = 4,
   units = "in"
 )
+
+
+
+mbg51_ann <- read_csv("~/Desktop/06012025_updated_vdj_tables/mbg51_total_hc.csv")
+mbg51_ann <- mbg51_ann[mbg51_ann$chain_type == "igh",]
+
+
+## -------------------------------------------------------------------------
+## Prepare VDJ alluvial dataframe
+## -------------------------------------------------------------------------
+
+vdj_alluvial_df <- mbg51_ann %>%
+  dplyr::mutate(
+    j_gene_clean = ifelse(
+      is.na(j_gene) | j_gene == "",
+      "Unknown_J",
+      stringr::str_remove(as.character(j_gene), "\\*.*$")
+    ),
+    d_gene_clean = ifelse(
+      is.na(d_gene) | d_gene == "",
+      "No_D_gene",
+      stringr::str_remove(as.character(d_gene), "\\*.*$")
+    ),
+    v_gene_clean = ifelse(
+      is.na(v_gene) | v_gene == "",
+      "Unknown_V",
+      stringr::str_remove(as.character(v_gene), "\\*.*$")
+    )
+  ) %>%
+  dplyr::count(j_gene_clean, d_gene_clean, v_gene_clean, name = "n")
+
+head(vdj_alluvial_df)
+
+## -------------------------------------------------------------------------
+## Alluvial plot: J gene -> D gene -> V gene
+## -------------------------------------------------------------------------
+
+plot_vdj_alluvial <- ggplot(
+  vdj_alluvial_df,
+  aes(
+    axis1 = v_gene_clean,
+    axis2 = d_gene_clean,
+    axis3 = j_gene_clean,
+    y = n
+  )
+) +
+  geom_alluvium(fill = "turquoise4", width = 2/12, alpha = 0.35) +
+  geom_stratum(width = 3/12, fill = "white", color = "grey40") +
+  scale_x_discrete(
+    limits = c("V gene", "D gene", "J gene"),
+    expand = c(0.08, 0.08)
+  ) +
+  labs(
+    x = NULL,
+    y = "Number of cells / contigs",
+    title = "VDJ usage in MBG51"
+  ) +
+  theme_classic() +
+  theme(
+    legend.position = "none",
+    axis.text.y = element_text(size = 10),
+    axis.text.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    plot.title = element_text(hjust = 0.5)
+  )
+
+plot_vdj_alluvial
+
+
+ggsave(
+  filename = "~/Desktop/MBG51_VDJ_alluvial_V_D_J.svg",
+  plot = plot_vdj_alluvial,
+  device = "svg",
+  bg = "transparent",
+  width = 4,
+  height = 6,
+  units = "in"
+)
+
+library(dplyr)
+library(vegan)
+
+## Vector of VDJ combination counts
+vdj_counts <- vdj_alluvial_df$n
+
+## Proportions
+vdj_props <- vdj_counts / sum(vdj_counts)
+
+vdj_diversity <- tibble::tibble(
+  n_unique_vdj_combos = length(vdj_counts),
+  total_contigs_or_cells = sum(vdj_counts),
+  shannon = vegan::diversity(vdj_counts, index = "shannon"),
+  simpson = vegan::diversity(vdj_counts, index = "simpson"),
+  inverse_simpson = vegan::diversity(vdj_counts, index = "invsimpson"),
+  pielou_evenness = shannon / log(n_unique_vdj_combos)
+)
+
+vdj_diversity
+
+n_unique <- nrow(vdj_alluvial_df)
+
+H <- 6.50
+H_max <- log(n_unique)
+evenness <- H / H_max
+
+H_max
+evenness
